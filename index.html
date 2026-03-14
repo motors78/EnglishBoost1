@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EnglishBoost - Impara l'Inglese</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
+        .animate-bounce { animation: bounce 2s infinite; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-50 to-blue-50">
+    <div id="app"></div>
+
+    <script>
+        // PATH ASSOLUTO - CAMBIA QUESTO SE IL TUO SITO È IN ALTRA CARTELLA
+    const API_BASE = '/english/api/';
+        console.log('API Base URL:', API_BASE); // Debug
+        
+        const app = document.getElementById('app');
+        let state = {
+            page: 'login',
+            user: null,
+            lessons: [],
+            vocabulary: [],
+            verbs: [],
+            leaderboard: [],
+            selectedLesson: null,
+            lessonStep: 0,
+            lessonAnswers: [],
+            cardIdx: 0,
+            flipped: false,
+            verbIdx: 0,
+            showRegister: false
+        };
+
+        // API Helper con migliore error handling
+        async function apiCall(endpoint, method = 'GET', data = null) {
+            const url = API_BASE + endpoint;
+            console.log(`API Call: ${method} ${url}`, data); // Debug
+            
+            try {
+                const options = {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include'
+                };
+                if (data) options.body = JSON.stringify(data);
+                
+                const res = await fetch(url, options);
+                console.log('Response status:', res.status); // Debug
+                
+                const json = await res.json();
+                console.log('Response data:', json); // Debug
+                
+                if (!res.ok) {
+                    throw new Error(json.error || `HTTP ${res.status}`);
+                }
+                return json;
+            } catch (err) {
+                console.error('API Error:', err);
+                alert('Errore: ' + err.message);
+                throw err;
+            }
+        }
+
+        // Check sessione
+        async function checkSession() {
+            try {
+                const data = await apiCall('auth.php?action=check');
+                if (data.authenticated) {
+                    state.user = data.user;
+                    await loadData();
+                    goTo('dash');
+                }
+            } catch (err) {
+                console.log('Non loggato');
+            }
+            render();
+        }
+
+        // Login
+        async function handleLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            try {
+                const data = await apiCall('auth.php?action=login', 'POST', { email, password });
+                if (data.success) {
+                    state.user = data.user;
+                    await loadData();
+                    goTo('dash');
+                }
+            } catch (err) {
+                console.error('Login failed:', err);
+            }
+        }
+
+        // Registrazione
+        async function handleRegister(e) {
+            e.preventDefault();
+            const username = document.getElementById('regUsername').value;
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+            
+            try {
+                const data = await apiCall('auth.php?action=register', 'POST', { username, email, password });
+                if (data.success) {
+                    state.user = data.user;
+                    await loadData();
+                    goTo('dash');
+                }
+            } catch (err) {
+                console.error('Register failed:', err);
+            }
+        }
+
+        // Logout
+        async function handleLogout() {
+            try {
+                await apiCall('auth.php?action=logout', 'POST');
+                state.user = null;
+                state.lessons = [];
+                state.vocabulary = [];
+                state.verbs = [];
+                goTo('login');
+            } catch (err) {
+                console.error('Logout failed:', err);
+            }
+        }
+
+        // Carica dati
+        async function loadData() {
+            try {
+                const [lessons, vocab, verbs, board] = await Promise.all([
+                    apiCall('lessons.php?action=list'),
+                    apiCall('vocabulary.php?action=list'),
+                    apiCall('verbs.php?action=list'),
+                    apiCall('leaderboard.php?action=global&limit=10')
+                ]);
+                
+                state.lessons = lessons.lessons || [];
+                state.vocabulary = vocab.vocabulary || [];
+                state.verbs = verbs.verbs || [];
+                state.leaderboard = board.leaderboard || [];
+                
+                console.log('Dati caricati:', { 
+                    lessons: state.lessons.length, 
+                    vocab: state.vocabulary.length, 
+                    verbs: state.verbs.length 
+                });
+            } catch (err) {
+                console.error('Errore caricamento dati:', err);
+            }
+        }
+
+        // Completa lezione
+        async function completeLesson(lessonId, answers) {
+            try {
+                const data = await apiCall('lessons.php?action=complete', 'POST', {
+                    lesson_id: lessonId,
+                    score: answers.length,
+                    answers
+                });
+                
+                if (data.success || data.xp_earned !== undefined) {
+                    state.user.current_xp = data.current_xp || state.user.current_xp;
+                    state.user.level = data.new_level || state.user.level;
+                    state.user.max_xp = data.max_xp || state.user.max_xp;
+                    return data;
+                }
+            } catch (err) {
+                console.error('Errore completamento lezione:', err);
+            }
+        }
+
+        // Navigation
+        function goTo(page) {
+            state.page = page;
+            render();
+        }
+
+        function toggleRegister() {
+            state.showRegister = !state.showRegister;
+            render();
+        }
+
+        // Render
+        function render() {
+            if (state.page === 'login') {
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 flex items-center justify-center p-4">
+                        <div class="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-md">
+                            <div class="text-center mb-8">
+                                <div class="text-6xl mb-4 animate-bounce">🚀</div>
+                                <h1 class="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">EnglishBoost</h1>
+                                <p class="text-gray-600 mt-2">Impara l'inglese divertendoti!</p>
+                            </div>
+                            
+                            ${!state.showRegister ? `
+                                <form onsubmit="handleLogin(event)" class="space-y-4">
+                                    <h2 class="text-2xl font-bold mb-4">Accedi</h2>
+                                    <input id="loginEmail" type="email" placeholder="Email" value="demo@englishboost.com" class="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500" required>
+                                    <input id="loginPassword" type="password" placeholder="Password" value="demo123" class="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500" required>
+                                    <button type="submit" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-xl font-semibold hover:shadow-lg transition">
+                                        Accedi
+                                    </button>
+                                    <p class="text-center text-sm">
+                                        Non hai un account? 
+                                        <button type="button" onclick="toggleRegister()" class="text-blue-600 font-semibold">Registrati</button>
+                                    </p>
+                                </form>
+                            ` : `
+                                <form onsubmit="handleRegister(event)" class="space-y-4">
+                                    <h2 class="text-2xl font-bold mb-4">Registrati</h2>
+                                    <input id="regUsername" type="text" placeholder="Username" class="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500" required minlength="3">
+                                    <input id="regEmail" type="email" placeholder="Email" class="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500" required>
+                                    <input id="regPassword" type="password" placeholder="Password (min 6 caratteri)" class="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500" required minlength="6">
+                                    <button type="submit" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-xl font-semibold hover:shadow-lg transition">
+                                        Registrati
+                                    </button>
+                                    <p class="text-center text-sm">
+                                        Hai già un account? 
+                                        <button type="button" onclick="toggleRegister()" class="text-blue-600 font-semibold">Accedi</button>
+                                    </p>
+                                </form>
+                            `}
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            if (!state.user) {
+                goTo('login');
+                return;
+            }
+
+            // Navbar
+            const navbar = `
+                <nav class="bg-white shadow-lg sticky top-0 z-50">
+                    <div class="max-w-7xl mx-auto px-4 py-4">w
+                        <div class="flex justify-between items-center">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-2xl">🚀</span>
+                                <span class="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">EnglishBoost</span>
+                            </div>
+                            <div class="hidden md:flex space-x-6">
+                                <button onclick="goTo('dash')" class="hover:text-blue-600 transition">Dashboard</button>
+                                <button onclick="goTo('lessons')" class="hover:text-blue-600 transition">Lezioni</button>
+                                <button onclick="goTo('vocab')" class="hover:text-blue-600 transition">Vocabolario</button>
+                                <button onclick="goTo('verbs')" class="hover:text-blue-600 transition">Verbi</button>
+                                <button onclick="goTo('board')" class="hover:text-blue-600 transition">Classifica</button>
+                                <button onclick="goTo('achievements')">🏆 Achievement</button>
+                                <button onclick="goTo('daily-challenges')">🎯 Sfide</button>
+                                <button onclick="goTo('skills')">🌳 Skills</button>
+                                <button onclick="goTo('league')">🏅 Lega</button>
+                                <button onclick="goTo('powerups')">⚡ Power-ups</button>
+                                </div>
+                            <div class="flex items-center space-x-4">
+                                <div class="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-4 py-2 rounded-full font-semibold">
+                                    ⭐ ${state.user.current_xp || 0} XP
+                                </div>
+                                <button onclick="handleLogout()" class="text-gray-600 hover:text-gray-800 text-xl">🚪</button>
+                            </div>
+                        </div>
+                    </div>
+                </nav>
+            `;
+
+            let content = '';
+
+            if (state.page === 'dash') {
+                content = `
+                    <div class="max-w-7xl mx-auto p-8">
+                        <h1 class="text-4xl font-bold mb-8">Benvenuto, ${state.user.username}! 👋</h1>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                            <div class="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-3xl p-6 text-white shadow-xl hover:scale-105 transition">
+                                <div class="text-3xl mb-2">🏆</div>
+                                <div class="text-2xl font-bold">Livello ${state.user.level || 1}</div>
+                                <div class="text-sm mt-2">${state.user.current_xp || 0}/${state.user.max_xp || 300} XP</div>
+                                <div class="w-full bg-white/30 rounded-full h-3 mt-2">
+                                    <div class="bg-white rounded-full h-3 transition-all" style="width: ${((state.user.current_xp || 0)/(state.user.max_xp || 300))*100}%"></div>
+                                </div>
+                            </div>
+                            
+                            <div class="bg-gradient-to-br from-orange-500 to-red-600 rounded-3xl p-6 text-white shadow-xl hover:scale-105 transition">
+                                <div class="text-3xl mb-2">🔥</div>
+                                <div class="text-2xl font-bold">${state.user.streak_days || 0} giorni</div>
+                                <div class="text-sm mt-2">Streak consecutivo</div>
+                            </div>
+                            
+                            <div class="bg-gradient-to-br from-green-500 to-emerald-600 rounded-3xl p-6 text-white shadow-xl hover:scale-105 transition">
+                                <div class="text-3xl mb-2">📚</div>
+                                <div class="text-2xl font-bold">${state.lessons.length}</div>
+                                <div class="text-sm mt-2">Lezioni disponibili</div>
+                            </div>
+                            
+                            <div class="bg-gradient-to-br from-purple-500 to-pink-600 rounded-3xl p-6 text-white shadow-xl hover:scale-105 transition">
+                                <div class="text-3xl mb-2">⭐</div>
+                                <div class="text-2xl font-bold">${state.user.total_xp || 0}</div>
+                                <div class="text-sm mt-2">XP Totali</div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white rounded-3xl p-6 shadow-xl">
+                            <h2 class="text-2xl font-bold mb-4">Quick Actions ⚡</h2>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <button onclick="goTo('lessons')" class="bg-gradient-to-r from-blue-500 to-indigo-500 text-white p-6 rounded-2xl font-semibold hover:shadow-lg hover:scale-105 transition">
+                                    📚 Inizia Lezione
+                                </button>
+                                <button onclick="goTo('vocab')" class="bg-gradient-to-r from-green-500 to-emerald-500 text-white p-6 rounded-2xl font-semibold hover:shadow-lg hover:scale-105 transition">
+                                    📖 Vocabolario
+                                </button>
+                                <button onclick="goTo('verbs')" class="bg-gradient-to-r from-orange-500 to-red-500 text-white p-6 rounded-2xl font-semibold hover:shadow-lg hover:scale-105 transition">
+                                    ✏️ Verbi Irregolari
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (state.page === 'lessons') {
+                if (!state.selectedLesson) {
+                    content = `
+                        <div class="max-w-7xl mx-auto p-8">
+                            <h1 class="text-4xl font-bold mb-8">Lezioni 📚</h1>
+                            ${state.lessons.length === 0 ? '<p class="text-center text-gray-500">Caricamento lezioni...</p>' : ''}
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                ${state.lessons.map(l => `
+                                    <div class="bg-white rounded-3xl p-6 shadow-xl hover:shadow-2xl hover:scale-105 transition cursor-pointer" onclick="startLesson(${l.id})">
+                                        <div class="flex justify-between mb-4">
+                                            <h3 class="text-2xl font-bold">${l.title}</h3>
+                                            <span class="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm font-semibold">${l.difficulty}</span>
+                                        </div>
+                                        <p class="text-gray-600 mb-4">${(l.theory || '').substring(0, 80)}...</p>
+                                        <div class="flex justify-between items-center">
+                                            <span class="text-purple-600 font-bold">+${l.xp_reward} XP</span>
+                                            <span class="text-blue-600 font-semibold">Inizia →</span>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    const l = state.selectedLesson;
+                    if (state.lessonAnswers.length >= (l.exercises || []).length) {
+                        const correct = state.lessonAnswers.filter((a, i) => a === l.exercises[i].correct).length;
+                        const xpEarned = Math.floor((correct / l.exercises.length) * l.xp_reward);
+                        content = `
+                            <div class="max-w-2xl mx-auto p-8">
+                                <div class="bg-white rounded-3xl p-8 shadow-xl text-center">
+                                    <div class="text-6xl mb-4">🎉</div>
+                                    <h2 class="text-3xl font-bold mb-4">Lezione Completata!</h2>
+                                    <p class="text-xl mb-2">Risposte corrette: ${correct}/${l.exercises.length}</p>
+                                    <p class="text-xl mb-6">Hai guadagnato <span class="font-bold text-purple-600">${xpEarned} XP</span></p>
+                                    <button onclick="endLesson()" class="bg-gradient-to-r from-blue-500 to-indigo-500 text-white px-8 py-3 rounded-xl font-semibold hover:shadow-lg transition">
+                                        Torna alle Lezioni
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        const ex = (l.exercises || [])[state.lessonStep] || {};
+                        content = `
+                            <div class="max-w-3xl mx-auto p-8">
+                                <div class="bg-white rounded-3xl p-8 shadow-xl">
+                                    <div class="mb-6">
+                                        <div class="flex justify-between text-sm mb-2">
+                                            <span>Progresso</span>
+                                            <span>${state.lessonStep + 1}/${l.exercises.length}</span>
+                                        </div>
+                                        <div class="w-full bg-gray-200 rounded-full h-3">
+                                            <div class="bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full h-3 transition-all" style="width: ${((state.lessonStep + 1)/l.exercises.length)*100}%"></div>
+                                        </div>
+                                    </div>
+                                    
+                                    <h2 class="text-3xl font-bold mb-4">${l.title}</h2>
+                                    <p class="text-xl mb-6">${ex.question || ''}</p>
+                                    
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        ${(ex.options || []).map((opt, i) => `
+                                            <button 
+                                                onclick="answerQuestion(${i})" 
+                                                ${state.lessonAnswers[state.lessonStep] !== undefined ? 'disabled' : ''}
+                                                class="p-4 rounded-xl border-2 hover:border-blue-500 hover:bg-blue-50 transition text-lg font-semibold ${state.lessonAnswers[state.lessonStep] === i ? (i === ex.correct ? 'bg-green-100 border-green-500' : 'bg-red-100 border-red-500') : 'border-gray-300'}"
+                                            >
+                                                ${opt}
+                                            </button>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+            } else if (state.page === 'vocab') {
+                const v = state.vocabulary[state.cardIdx];
+                content = `
+                    <div class="max-w-2xl mx-auto p-8">
+                        <h1 class="text-4xl font-bold mb-8">Vocabolario 📖</h1>
+                        ${state.vocabulary.length === 0 ? '<p class="text-center text-gray-500">Caricamento vocabolario...</p>' : ''}
+                        ${v ? `
+                            <div onclick="flipCard()" class="bg-white rounded-3xl p-12 shadow-xl mb-6 min-h-[300px] cursor-pointer hover:shadow-2xl transition flex items-center justify-center">
+                                <div class="text-center">
+                                    ${!state.flipped ? `
+                                        <div class="text-6xl font-bold text-blue-600 mb-4">${v.word}</div>
+                                        <span class="bg-blue-100 text-blue-600 px-4 py-2 rounded-full text-sm">${v.difficulty}</span>
+                                        <p class="text-gray-500 mt-8">👆 Clicca per vedere la traduzione</p>
+                                    ` : `
+                                        <div class="text-6xl font-bold text-green-600 mb-4">${v.translation}</div>
+                                        <div class="text-3xl text-gray-400 mb-4">${v.word}</div>
+                                        <p class="text-gray-600 italic">${v.example_sentence || ''}</p>
+                                    `}
+                                </div>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <button onclick="prevCard()" ${state.cardIdx === 0 ? 'disabled' : ''} class="bg-gray-200 px-6 py-3 rounded-xl font-semibold hover:bg-gray-300 transition disabled:opacity-50">
+                                    ← Precedente
+                                </button>
+                                <span class="text-lg font-semibold">${state.cardIdx + 1}/${state.vocabulary.length}</span>
+                                <button onclick="nextCard()" ${state.cardIdx === state.vocabulary.length - 1 ? 'disabled' : ''} class="bg-gradient-to-r from-blue-500 to-indigo-500 text-white px-6 py-3 rounded-xl font-semibold hover:shadow-lg transition disabled:opacity-50">
+                                    Successiva →
+                                </button>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            } else if (state.page === 'verbs') {
+                content = `
+                    <div class="max-w-6xl mx-auto p-8">
+                        <h1 class="text-4xl font-bold mb-8">Verbi Irregolari ✏️</h1>
+                        ${state.verbs.length === 0 ? '<p class="text-center text-gray-500">Caricamento verbi...</p>' : ''}
+                        <div class="bg-white rounded-3xl p-6 shadow-xl overflow-x-auto mb-6">
+                            <table class="w-full">
+                                <thead>
+                                    <tr class="border-b-2 border-gray-200">
+                                        <th class="p-4 text-left font-bold">Base Form</th>
+                                        <th class="p-4 text-left font-bold">Past Simple</th>
+                                        <th class="p-4 text-left font-bold">Past Participle</th>
+                                        <th class="p-4 text-left font-bold">Traduzione</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${state.verbs.map(v => `
+                                        <tr class="border-b border-gray-100 hover:bg-blue-50 transition">
+                                            <td class="p-4 font-bold text-blue-600">${v.base_form}</td>
+                                            <td class="p-4">${v.past_simple}</td>
+                                            <td class="p-4">${v.past_participle}</td>
+                                            <td class="p-4 text-gray-600">${v.translation}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            } else if (state.page === 'board') {
+                content = `
+                    <div class="max-w-4xl mx-auto p-8">
+                        <h1 class="text-4xl font-bold mb-8">Classifica Globale 🏆</h1>
+                        ${state.leaderboard.length === 0 ? '<p class="text-center text-gray-500">Caricamento classifica...</p>' : ''}
+                        <div class="bg-white rounded-3xl p-6 shadow-xl">
+                            ${state.leaderboard.map((u, i) => `
+                                <div class="flex items-center justify-between p-4 border-b border-gray-100 hover:bg-blue-50 transition ${u.id === state.user.id ? 'bg-blue-100' : ''}">
+                                    <div class="flex items-center space-x-4">
+                                        <div class="text-2xl font-bold ${i < 3 ? 'text-yellow-500' : 'text-gray-400'}">#${u.rank}</div>
+                                        <div class="text-3xl">${u.avatar}</div>
+                                        <div>
+                                            <div class="font-bold text-lg">${u.username} ${u.id === state.user.id ? '(Tu)' : ''}</div>
+                                            <div class="text-sm text-gray-500">Livello ${u.level} • ${u.streak_days} giorni streak</div>
+                                        </div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-2xl font-bold text-purple-600">${u.total_xp}</div>
+                                        <div class="text-sm text-gray-500">XP</div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            app.innerHTML = navbar + content;
+        }
+
+        // Lesson functions
+        async function startLesson(id) {
+            state.selectedLesson = state.lessons.find(l => l.id === id);
+            state.lessonStep = 0;
+            state.lessonAnswers = [];
+            render();
+        }
+
+        async function answerQuestion(idx) {
+            if (state.lessonAnswers[state.lessonStep] !== undefined) return;
+            
+            state.lessonAnswers[state.lessonStep] = idx;
+            render();
+            
+            await new Promise(r => setTimeout(r, 1000));
+            
+            if (state.lessonStep < state.selectedLesson.exercises.length - 1) {
+                state.lessonStep++;
+                render();
+            } else {
+                await completeLesson(state.selectedLesson.id, state.lessonAnswers);
+                render();
+            }
+        }
+
+        function endLesson() {
+            state.selectedLesson = null;
+            state.lessonStep = 0;
+            state.lessonAnswers = [];
+            goTo('lessons');
+        }
+
+        // Vocab functions
+        function flipCard() {
+            state.flipped = !state.flipped;
+            render();
+        }
+
+        function nextCard() {
+            if (state.cardIdx < state.vocabulary.length - 1) {
+                state.cardIdx++;
+                state.flipped = false;
+                render();
+            }
+        }
+
+        function prevCard() {
+            if (state.cardIdx > 0) {
+                state.cardIdx--;
+                state.flipped = false;
+                render();
+            }
+        }
+
+        // Init
+        checkSession();
+    </script>
+</body>
+</html>

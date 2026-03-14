@@ -1,0 +1,260 @@
+-- ================================================
+-- ENGLISHBOOST DATABASE SCHEMA
+-- Per XAMPP/MySQL
+-- ================================================
+
+-- Crea il database
+CREATE DATABASE IF NOT EXISTS englishboost CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE englishboost;
+
+-- ================================================
+-- TABELLA USERS - Utenti registrati
+-- ================================================
+CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    level INT DEFAULT 1,
+    total_xp INT DEFAULT 0,
+    current_xp INT DEFAULT 0,
+    max_xp INT DEFAULT 300,
+    streak_days INT DEFAULT 0,
+    last_login DATE,
+    avatar VARCHAR(10) DEFAULT '👨',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_email (email),
+    INDEX idx_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================================================
+-- TABELLA LESSONS - Catalogo lezioni
+-- ================================================
+CREATE TABLE lessons (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(100) NOT NULL,
+    difficulty ENUM('A1', 'A2', 'B1', 'B2', 'C1', 'C2') NOT NULL,
+    xp_reward INT DEFAULT 50,
+    theory TEXT NOT NULL,
+    examples JSON,
+    exercises JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================================================
+-- TABELLA LESSONS_COMPLETED - Lezioni completate dagli utenti
+-- ================================================
+CREATE TABLE lessons_completed (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    lesson_id INT NOT NULL,
+    score INT DEFAULT 0,
+    xp_earned INT DEFAULT 0,
+    completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (lesson_id) REFERENCES lessons(id) ON DELETE CASCADE,
+    INDEX idx_user (user_id),
+    INDEX idx_lesson (lesson_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================================================
+-- TABELLA VOCABULARY - Catalogo parole
+-- ================================================
+CREATE TABLE vocabulary (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    word VARCHAR(100) NOT NULL,
+    translation VARCHAR(100) NOT NULL,
+    difficulty ENUM('A1', 'A2', 'B1', 'B2', 'C1', 'C2') NOT NULL,
+    category VARCHAR(50),
+    example_sentence TEXT,
+    audio_url VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================================================
+-- TABELLA VOCABULARY_LEARNED - Parole apprese dagli utenti
+-- ================================================
+CREATE TABLE vocabulary_learned (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    vocabulary_id INT NOT NULL,
+    times_reviewed INT DEFAULT 1,
+    mastery_level INT DEFAULT 1,
+    last_reviewed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (vocabulary_id) REFERENCES vocabulary(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_vocab (user_id, vocabulary_id),
+    INDEX idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================================================
+-- TABELLA VERBS - Catalogo verbi irregolari
+-- ================================================
+CREATE TABLE verbs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    base_form VARCHAR(50) NOT NULL,
+    past_simple VARCHAR(50) NOT NULL,
+    past_participle VARCHAR(50) NOT NULL,
+    translation VARCHAR(100) NOT NULL,
+    level ENUM('A1', 'A2', 'B1', 'B2') NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================================================
+-- TABELLA VERBS_PRACTICED - Verbi praticati dagli utenti
+-- ================================================
+CREATE TABLE verbs_practiced (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    verb_id INT NOT NULL,
+    correct_attempts INT DEFAULT 0,
+    total_attempts INT DEFAULT 0,
+    last_practiced TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (verb_id) REFERENCES verbs(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_verb (user_id, verb_id),
+    INDEX idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================================================
+-- TABELLA ACHIEVEMENTS - Badge e achievement
+-- ================================================
+CREATE TABLE achievements (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    emoji VARCHAR(10),
+    requirement_type ENUM('lessons', 'xp', 'streak', 'vocabulary', 'verbs', 'chat') NOT NULL,
+    requirement_value INT NOT NULL,
+    xp_reward INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================================================
+-- TABELLA USER_ACHIEVEMENTS - Achievement sbloccati dagli utenti
+-- ================================================
+CREATE TABLE user_achievements (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    achievement_id INT NOT NULL,
+    unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (achievement_id) REFERENCES achievements(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_achievement (user_id, achievement_id),
+    INDEX idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================================================
+-- TABELLA AI_CONVERSATIONS - Conversazioni AI Chat
+-- ================================================
+CREATE TABLE ai_conversations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    scenario_id INT NOT NULL,
+    messages JSON,
+    xp_earned INT DEFAULT 0,
+    completed BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================================================
+-- TABELLA DAILY_CHALLENGES - Sfide giornaliere
+-- ================================================
+CREATE TABLE daily_challenges (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    challenge_date DATE NOT NULL UNIQUE,
+    challenge_1_type VARCHAR(50),
+    challenge_1_target INT,
+    challenge_1_xp INT,
+    challenge_2_type VARCHAR(50),
+    challenge_2_target INT,
+    challenge_2_xp INT,
+    challenge_3_type VARCHAR(50),
+    challenge_3_target INT,
+    challenge_3_xp INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================================================
+-- TABELLA USER_DAILY_PROGRESS - Progresso sfide giornaliere
+-- ================================================
+CREATE TABLE user_daily_progress (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    challenge_date DATE NOT NULL,
+    challenge_1_progress INT DEFAULT 0,
+    challenge_2_progress INT DEFAULT 0,
+    challenge_3_progress INT DEFAULT 0,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_date (user_id, challenge_date),
+    INDEX idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================================================
+-- TABELLA XP_HISTORY - Storico guadagni XP
+-- ================================================
+CREATE TABLE xp_history (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    xp_amount INT NOT NULL,
+    source VARCHAR(50) NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user (user_id),
+    INDEX idx_date (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================================================
+-- INSERIMENTO DATI DEMO
+-- ================================================
+
+-- Inserisci lezioni demo
+INSERT INTO lessons (title, difficulty, xp_reward, theory, examples, exercises) VALUES
+('Present Simple', 'A1', 50, 'Il Present Simple si usa per azioni abituali e verità generali.', 
+'["I work every day", "She likes coffee"]', 
+'[{"question":"She ___ to school.","options":["go","goes","going","went"],"correct":1}]'),
+
+('Past Simple', 'A2', 75, 'Il Past Simple si usa per azioni completate nel passato.',
+'["I visited Rome", "She went yesterday"]',
+'[{"question":"I ___ to London.","options":["go","goes","went","going"],"correct":2}]'),
+
+('Present Continuous', 'A2', 60, 'Il Present Continuous per azioni in corso.',
+'["I am studying", "She is reading"]',
+'[{"question":"He ___ a book.","options":["read","reads","is reading","reading"],"correct":2}]');
+
+-- Inserisci vocabolario demo
+INSERT INTO vocabulary (word, translation, difficulty, category, example_sentence) VALUES
+('Beautiful', 'Bello/a', 'A1', 'Aggettivi', 'She has a beautiful smile.'),
+('Adventure', 'Avventura', 'A2', 'Sostantivi', 'Life is a great adventure.'),
+('Grateful', 'Grato/a', 'B1', 'Aggettivi', 'I am grateful for your help.'),
+('Challenge', 'Sfida', 'A2', 'Sostantivi', 'This is a big challenge.'),
+('Courage', 'Coraggio', 'A2', 'Sostantivi', 'It takes courage to change.');
+
+-- Inserisci verbi demo
+INSERT INTO verbs (base_form, past_simple, past_participle, translation, level) VALUES
+('go', 'went', 'gone', 'andare', 'A1'),
+('see', 'saw', 'seen', 'vedere', 'A1'),
+('make', 'made', 'made', 'fare', 'A1'),
+('take', 'took', 'taken', 'prendere', 'A1'),
+('come', 'came', 'come', 'venire', 'A1');
+
+-- Inserisci achievement demo
+INSERT INTO achievements (name, description, emoji, requirement_type, requirement_value, xp_reward) VALUES
+('Principiante', 'Completa la prima lezione', '🎯', 'lessons', 1, 50),
+('Streak 7', '7 giorni consecutivi', '🔥', 'streak', 7, 100),
+('Poliglotta', '50 parole apprese', '🌍', 'vocabulary', 50, 200),
+('Master', 'Raggiungi livello 10', '👑', 'xp', 3000, 500),
+('Conversatore', 'Completa 10 chat AI', '💬', 'chat', 10, 150),
+('Esperto Verbi', 'Impara 50 verbi', '📚', 'verbs', 50, 200);
+
+-- Inserisci utente demo (password: demo123 - hash bcrypt)
+INSERT INTO users (username, email, password, level, total_xp, current_xp, max_xp, streak_days, avatar) VALUES
+('Mario', 'demo@englishboost.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 5, 1250, 1250, 1500, 7, '👨');
+
+-- ================================================
+-- FINE SCHEMA
+-- ================================================

@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EnglishBoost - Gamification</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes fadeInScale {
+            from {
+                opacity: 0;
+                transform: scale(0.8);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-20px); }
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        
+        .achievement-unlock {
+            animation: fadeInScale 0.5s ease-out;
+        }
+        
+        .notification-enter {
+            animation: slideUp 0.3s ease-out;
+        }
+        
+        .badge-locked {
+            filter: grayscale(100%) opacity(0.3);
+        }
+        
+        .badge-unlocked {
+            animation: pulse 0.6s ease-in-out;
+        }
+        
+        .league-badge {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .league-badge::after {
+            content: '';
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            width: 20px;
+            height: 20px;
+            background: #FFD700;
+            border-radius: 50%;
+            animation: bounce 2s infinite;
+        }
+        
+        .skill-tree-node {
+            transition: all 0.3s ease;
+        }
+        
+        .skill-tree-node:hover {
+            transform: scale(1.1);
+        }
+        
+        .progress-bar-animated {
+            transition: width 1s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-50 to-blue-50 min-h-screen">
+    
+    <!-- Achievement Unlock Modal -->
+    <div id="achievementModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+        <div id="achievementContent" class="achievement-unlock bg-white rounded-3xl p-8 max-w-md mx-4 text-center"></div>
+    </div>
+    
+    <!-- Notification Toast -->
+    <div id="notificationToast" class="hidden fixed top-4 right-4 z-50"></div>
+    
+    <!-- Main App -->
+    <div id="app"></div>
+
+    <script>
+        const API_BASE = '/english/api/';
+        
+        let state = {
+            page: 'achievements',
+            achievements: [],
+            dailyChallenges: [],
+            skills: [],
+            league: null,
+            powerUps: [],
+            tournament: null
+        };
+
+        // ================================================
+        // API CALLS
+        // ================================================
+        
+        async function apiCall(endpoint, method = 'GET', data = null) {
+            const url = API_BASE + endpoint;
+            const options = {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include'
+            };
+            if (data) options.body = JSON.stringify(data);
+            
+            const res = await fetch(url, options);
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.error);
+            return json;
+        }
+        
+        async function loadGamificationData() {
+            try {
+                const [achievements, challenges, skills, league, powerUps] = await Promise.all([
+                    apiCall('gamification.php?action=achievements'),
+                    apiCall('gamification.php?action=daily-challenges'),
+                    apiCall('gamification.php?action=skills'),
+                    apiCall('gamification.php?action=my-league'),
+                    apiCall('gamification.php?action=power-ups')
+                ]);
+                
+                state.achievements = achievements.achievements || [];
+                state.dailyChallenges = challenges.challenges || [];
+                state.skills = skills.skills || [];
+                state.league = league.league;
+                state.powerUps = powerUps.power_ups || [];
+                
+                render();
+            } catch (err) {
+                console.error('Errore caricamento dati:', err);
+            }
+        }
+        
+        // ================================================
+        // ACHIEVEMENT FUNCTIONS
+        // ================================================
+        
+        function showAchievementUnlock(achievement) {
+            const modal = document.getElementById('achievementModal');
+            const content = document.getElementById('achievementContent');
+            
+            content.innerHTML = `
+                <div class="text-6xl mb-4">${achievement.emoji}</div>
+                <div class="inline-block px-4 py-1 rounded-full text-xs font-bold mb-2 ${getRarityColor(achievement.rarity)}">
+                    ${achievement.rarity.toUpperCase()}
+                </div>
+                <h2 class="text-3xl font-bold mb-2">${achievement.name}</h2>
+                <p class="text-gray-600 mb-4">${achievement.description}</p>
+                <div class="text-2xl font-bold text-purple-600 mb-4">+${achievement.xp_reward} XP</div>
+                <button onclick="closeAchievementModal()" class="bg-gradient-to-r from-blue-500 to-indigo-500 text-white px-8 py-3 rounded-xl font-semibold hover:shadow-lg transition">
+                    Fantastico!
+                </button>
+            `;
+            
+            modal.classList.remove('hidden');
+        }
+        
+        function closeAchievementModal() {
+            document.getElementById('achievementModal').classList.add('hidden');
+        }
+        
+        function getRarityColor(rarity) {
+            const colors = {
+                'common': 'bg-gray-200 text-gray-700',
+                'rare': 'bg-blue-200 text-blue-700',
+                'epic': 'bg-purple-200 text-purple-700',
+                'legendary': 'bg-yellow-200 text-yellow-700'
+            };
+            return colors[rarity] || colors.common;
+        }
+        
+        function getCategoryColor(category) {
+            const colors = {
+                'beginner': 'from-green-400 to-emerald-500',
+                'intermediate': 'from-blue-400 to-indigo-500',
+                'advanced': 'from-purple-400 to-pink-500',
+                'expert': 'from-orange-400 to-red-500',
+                'legendary': 'from-yellow-400 to-orange-500'
+            };
+            return colors[category] || colors.beginner;
+        }
+        
+        // ================================================
+        // DAILY CHALLENGES FUNCTIONS
+        // ================================================
+        
+        async function claimDailyBonus() {
+            try {
+                const data = await apiCall('gamification.php?action=claim-daily-bonus', 'POST');
+                showNotification(data.message, 'success');
+                await loadGamificationData();
+            } catch (err) {
+                showNotification(err.message, 'error');
+            }
+        }
+        
+        // ================================================
+        // SKILLS FUNCTIONS
+        // ================================================
+        
+        async function allocateSkillPoint(skillType) {
+            try {
+                const data = await apiCall('gamification.php?action=allocate-skill-point', 'POST', { skill_type: skillType });
+                showNotification('Punto skill allocato!', 'success');
+                if (data.bonus_unlocked) {
+                    showNotification('Bonus sbloccato!', 'success');
+                }
+                await loadGamificationData();
+            } catch (err) {
+                showNotification(err.message, 'error');
+            }
+        }
+        
+        // ================================================
+        // POWER-UPS FUNCTIONS
+        // ================================================
+        
+        async function buyPowerUp(powerUpId) {
+            if (!confirm('Vuoi acquistare questo power-up?')) return;
+            
+            try {
+                const data = await apiCall('gamification.php?action=buy-power-up', 'POST', { power_up_id: powerUpId });
+                showNotification(data.message, 'success');
+                await loadGamificationData();
+            } catch (err) {
+                showNotification(err.message, 'error');
+            }
+        }
+        
+        async function activatePowerUp(powerUpId) {
+            try {
+                const data = await apiCall('gamification.php?action=activate-power-up', 'POST', { power_up_id: powerUpId });
+                showNotification(data.message, 'success');
+                await loadGamificationData();
+            } catch (err) {
+                showNotification(err.message, 'error');
+            }
+        }
+        
+        // ================================================
+        // NOTIFICATION SYSTEM
+        // ================================================
+        
+        function showNotification(message, type = 'info') {
+            const toast = document.getElementById('notificationToast');
+            const bgColor = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-blue-500';
+            
+            toast.innerHTML = `
+                <div class="notification-enter ${bgColor} text-white px-6 py-3 rounded-xl shadow-lg">
+                    ${message}
+                </div>
+            `;
+            toast.classList.remove('hidden');
+            
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 3000);
+        }
+        
+        // ================================================
+        // NAVIGATION
+        // ================================================
+        
+        function goTo(page) {
+            state.page = page;
+            render();
+        }
+        
+        // ================================================
+        // RENDER
+        // ================================================
+        
+        function render() {
+            const app = document.getElementById('app');
+            
+            const navbar = `
+                <nav class="bg-white shadow-lg sticky top-0 z-40">
+                    <div class="max-w-7xl mx-auto px-4 py-4">
+                        <div class="flex justify-between items-center">
+                            <div class="text-2xl font-bold">🎮 Gamification</div>
+                            <div class="flex space-x-4">
+                                <button onclick="goTo('achievements')" class="px-4 py-2 rounded-lg hover:bg-gray-100 ${state.page === 'achievements' ? 'bg-blue-100 text-blue-600' : ''}">
+                                    🏆 Achievement
+                                </button>
+                                <button onclick="goTo('challenges')" class="px-4 py-2 rounded-lg hover:bg-gray-100 ${state.page === 'challenges' ? 'bg-blue-100 text-blue-600' : ''}">
+                                    🎯 Sfide
+                                </button>
+                                <button onclick="goTo('skills')" class="px-4 py-2 rounded-lg hover:bg-gray-100 ${state.page === 'skills' ? 'bg-blue-100 text-blue-600' : ''}">
+                                    🌳 Skills
+                                </button>
+                                <button onclick="goTo('league')" class="px-4 py-2 rounded-lg hover:bg-gray-100 ${state.page === 'league' ? 'bg-blue-100 text-blue-600' : ''}">
+                                    🏅 Lega
+                                </button>
+                                <button onclick="goTo('powerups')" class="px-4 py-2 rounded-lg hover:bg-gray-100 ${state.page === 'powerups' ? 'bg-blue-100 text-blue-600' : ''}">
+                                    ⚡ Power-ups
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </nav>
+            `;
+            
+            let content = '';
+            
+            if (state.page === 'achievements') {
+                const categories = {
+                    'beginner': state.achievements.filter(a => a.category === 'beginner'),
+                    'intermediate': state.achievements.filter(a => a.category === 'intermediate'),
+                    'advanced': state.achievements.filter(a => a.category === 'advanced'),
+                    'expert': state.achievements.filter(a => a.category === 'expert'),
+                    'legendary': state.achievements.filter(a => a.category === 'legendary')
+                };
+                
+                const total = state.achievements.length;
+                const unlocked = state.achievements.filter(a => a.unlocked).length;
+                
+                content = `
+                    <div class="max-w-7xl mx-auto p-8">
+                        <div class="mb-8">
+                            <h1 class="text-4xl font-bold mb-4">Achievement 🏆</h1>
+                            <div class="bg-white rounded-3xl p-6 shadow-xl">
+                                <div class="flex justify-between items-center mb-4">
+                                    <div>
+                                        <div class="text-3xl font-bold">${unlocked}/${total}</div>
+                                        <div class="text-gray-600">Achievement Sbloccati</div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-2xl font-bold text-purple-600">${Math.round((unlocked/total)*100)}%</div>
+                                        <div class="text-gray-600">Completamento</div>
+                                    </div>
+                                </div>
+                                <div class="w-full bg-gray-200 rounded-full h-4">
+                                    <div class="bg-gradient-to-r from-purple-500 to-pink-500 rounded-full h-4 progress-bar-animated" style="width: ${(unlocked/total)*100}%"></div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        ${Object.entries(categories).map(([category, achievements]) => `
+                            <div class="mb-8">
+                                <h2 class="text-2xl font-bold mb-4 capitalize">${category}</h2>
+                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+                                    ${achievements.map(a => `
+                                        <div class="bg-white rounded-2xl p-6 shadow-lg ${a.unlocked ? 'badge-unlocked' : 'badge-locked'} hover:shadow-xl transition cursor-pointer">
+                                            <div class="text-center">
+                                                <div class="text-6xl mb-3">${a.emoji}</div>
+                                                <div class="inline-block px-3 py-1 rounded-full text-xs font-bold mb-2 ${getRarityColor(a.rarity)}">
+                                                    ${a.rarity}
+                                                </div>
+                                                <h3 class="text-lg font-bold mb-2">${a.name}</h3>
+                                                <p class="text-sm text-gray-600 mb-3">${a.description}</p>
+                                                <div class="text-purple-600 font-bold">+${a.xp_reward} XP</div>
+                                                ${a.unlocked ? `
+                                                    <div class="mt-2 text-xs text-green-600">✓ Sbloccato</div>
+                                                ` : `
+                                                    <div class="mt-2 text-xs text-gray-400">🔒 Bloccato</div>
+                                                `}
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+            
+            else if (state.page === 'challenges') {
+                const allCompleted = state.dailyChallenges.every(c => c.completed);
+                
+                content = `
+                    <div class="max-w-4xl mx-auto p-8">
+                        <h1 class="text-4xl font-bold mb-8">Sfide Giornaliere 🎯</h1>
+                        
+                        <div class="bg-gradient-to-r from-orange-400 to-red-500 rounded-3xl p-8 text-white shadow-xl mb-8">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <h2 class="text-3xl font-bold mb-2">Sfide del Giorno</h2>
+                                    <p class="text-lg">Completa tutte e 3 per un bonus!</p>
+                                </div>
+                                <div class="text-6xl">🎲</div>
+                            </div>
+                        </div>
+                        
+                        <div class="space-y-6 mb-8">
+                            ${state.dailyChallenges.map((c, i) => `
+                                <div class="bg-white rounded-3xl p-6 shadow-xl ${c.completed ? 'border-4 border-green-500' : ''}">
+                                    <div class="flex justify-between items-start mb-4">
+                                        <div class="flex-1">
+                                            <h3 class="text-2xl font-bold mb-2">${c.description}</h3>
+                                            <div class="text-lg text-purple-600 font-bold">+${c.xp} XP</div>
+                                        </div>
+                                        ${c.completed ? `
+                                            <div class="text-green-500 text-4xl">✓</div>
+                                        ` : `
+                                            <div class="text-gray-300 text-4xl">○</div>
+                                        `}
+                                    </div>
+                                    <div class="mb-2 text-sm text-gray-600">Progresso: ${c.progress}/${c.target}</div>
+                                    <div class="w-full bg-gray-200 rounded-full h-4">
+                                        <div class="bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full h-4 progress-bar-animated" style="width: ${Math.min((c.progress/c.target)*100, 100)}%"></div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        ${allCompleted ? `
+                            <div class="bg-gradient-to-r from-yellow-400 to-orange-500 rounded-3xl p-8 text-white shadow-xl text-center">
+                                <div class="text-6xl mb-4">🎉</div>
+                                <h2 class="text-3xl font-bold mb-4">Tutte le sfide completate!</h2>
+                                <button onclick="claimDailyBonus()" class="bg-white text-orange-600 px-8 py-3 rounded-xl font-bold text-lg hover:shadow-xl transition">
+                                    Reclama Bonus +150 XP
+                                </button>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+            
+            else if (state.page === 'skills') {
+                const skillIcons = {
+                    'grammar': '📝',
+                    'vocabulary': '📚',
+                    'speaking': '🗣️',
+                    'listening': '👂',
+                    'reading': '📖',
+                    'writing': '✍️'
+                };
+                
+                content = `
+                    <div class="max-w-7xl mx-auto p-8">
+                        <h1 class="text-4xl font-bold mb-8">Skill Tree 🌳</h1>
+                        
+                        <div class="bg-white rounded-3xl p-6 shadow-xl mb-8">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <h2 class="text-2xl font-bold">Punti Skill Disponibili</h2>
+                                    <p class="text-gray-600">Guadagni 1 punto per ogni livello</p>
+                                </div>
+                                <div class="text-5xl font-bold text-purple-600">${state.skills.available_points || 0}</div>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            ${state.skills.skills?.map(skill => `
+                                <div class="bg-white rounded-3xl p-6 shadow-xl skill-tree-node">
+                                    <div class="text-center mb-4">
+                                        <div class="text-6xl mb-2">${skillIcons[skill.skill_type]}</div>
+                                        <h3 class="text-2xl font-bold capitalize">${skill.skill_type}</h3>
+                                    </div>
+                                    
+                                    <div class="mb-4">
+                                        <div class="flex justify-between text-sm mb-2">
+                                            <span>Livello ${skill.skill_level}</span>
+                                            <span>${skill.skill_xp}/${skill.skill_max_xp} XP</span>
+                                        </div>
+                                        <div class="w-full bg-gray-200 rounded-full h-3">
+                                            <div class="bg-gradient-to-r from-green-500 to-emerald-500 rounded-full h-3" style="width: ${(skill.skill_xp/skill.skill_max_xp)*100}%"></div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="text-center">
+                                        <div class="text-lg font-bold text-purple-600 mb-3">Punti: ${skill.points_allocated}</div>
+                                        <button 
+                                            onclick="allocateSkillPoint('${skill.skill_type}')" 
+                                            ${(state.skills.available_points || 0) === 0 ? 'disabled' : ''}
+                                            class="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-2 rounded-xl font-semibold hover:shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                            Alloca Punto
+                                        </button>
+                                    </div>
+                                    
+                                    ${skill.skill_level % 5 === 0 && skill.skill_level > 0 ? `
+                                        <div class="mt-4 p-3 bg-yellow-50 rounded-xl text-center">
+                                            <div class="text-sm font-bold text-yellow-700">🎁 Bonus Attivo</div>
+                                            <div class="text-xs text-yellow-600">+${(skill.skill_level / 5) * 10}% XP</div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('') || '<p>Caricamento skills...</p>'}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            else if (state.page === 'league') {
+                content = `
+                    <div class="max-w-6xl mx-auto p-8">
+                        <h1 class="text-4xl font-bold mb-8">La Tua Lega 🏅</h1>
+                        
+                        ${state.league ? `
+                            <div class="bg-gradient-to-r ${getLeagueGradient(state.league.tier)} rounded-3xl p-8 text-white shadow-xl mb-8">
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <div class="text-6xl mb-4">${state.league.emoji}</div>
+                                        <h2 class="text-4xl font-bold mb-2">${state.league.name}</h2>
+                                        <p class="text-xl">Continua a salire per promuoverti!</p>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-3xl font-bold">${state.league.min_xp} - ${state.league.max_xp} XP</div>
+                                        <div class="text-lg">Range Lega</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="bg-white rounded-3xl p-6 shadow-xl">
+                                <h2 class="text-2xl font-bold mb-6">Classifica Lega</h2>
+                                <div class="space-y-3">
+                                    ${state.league.leaderboard?.map((user, i) => `
+                                        <div class="flex items-center justify-between p-4 rounded-xl ${i < 3 ? 'bg-yellow-50' : 'bg-gray-50'}">
+                                            <div class="flex items-center space-x-4">
+                                                <div class="text-2xl font-bold ${i < 3 ? 'text-yellow-600' : 'text-gray-400'}">#${i + 1}</div>
+                                                <div class="text-3xl">${user.avatar}</div>
+                                                <div>
+                                                    <div class="font-bold text-lg">${user.username}</div>
+                                                    <div class="text-sm text-gray-600">${user.streak_days} giorni streak</div>
+                                                </div>
+                                            </div>
+                                            <div class="text-right">
+                                                <div class="text-2xl font-bold text-purple-600">${user.total_xp}</div>
+                                                <div class="text-sm text-gray-500">XP</div>
+                                            </div>
+                                        </div>
+                                    `).join('') || '<p>Nessun giocatore</p>'}
+                                </div>
+                            </div>
+                        ` : '<p>Caricamento lega...</p>'}
+                    </div>
+                `;
+            }
+            
+            else if (state.page === 'powerups') {
+                content = `
+                    <div class="max-w-6xl mx-auto p-8">
+                        <h1 class="text-4xl font-bold mb-8">Power-ups ⚡</h1>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            ${state.powerUps.map(powerUp => `
+                                <div class="bg-white rounded-3xl p-6 shadow-xl hover:shadow-2xl transition">
+                                    <div class="text-center mb-4">
+                                        <div class="text-6xl mb-3">${powerUp.emoji}</div>
+                                        <h3 class="text-2xl font-bold mb-2">${powerUp.name}</h3>
+                                        <p class="text-gray-600 mb-4">${powerUp.description}</p>
+                                    </div>
+                                    
+                                    <div class="bg-purple-50 rounded-xl p-4 mb-4">
+                                        <div class="flex justify-between items-center mb-2">
+                                            <span class="text-sm font-medium">Durata</span>
+                                            <span class="font-bold">${powerUp.duration_hours}h</span>
+                                        </div>
+                                        <div class="flex justify-between items-center">
+                                            <span class="text-sm font-medium">Costo</span>
+                                            <span class="font-bold text-purple-600">${powerUp.xp_cost} XP</span>
+                                        </div>
+                                    </div>
+                                    
+                                    ${powerUp.owned > 0 ? `
+                                        <div class="mb-4 p-3 bg-green-50 rounded-xl text-center">
+                                            <div class="font-bold text-green-700">Posseduti: ${powerUp.owned}</div>
+                                            ${powerUp.active ? `
+                                                <div class="text-sm text-green-600 mt-1">⚡ Attivo</div>
+                                            ` : ''}
+                                        </div>
+                                        <button 
+                                            onclick="activatePowerUp(${powerUp.id})" 
+                                            ${powerUp.active ? 'disabled' : ''}
+                                            class="w-full bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 rounded-xl font-semibold hover:shadow-lg transition disabled:opacity-50">
+                                            ${powerUp.active ? 'Già Attivo' : 'Attiva'}
+                                        </button>
+                                    ` : `
+                                        <button 
+                                            onclick="buyPowerUp(${powerUp.id})" 
+                                            class="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-xl font-semibold hover:shadow-lg transition">
+                                            Acquista
+                                        </button>
+                                    `}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            app.innerHTML = navbar + content;
+        }
+        
+        function getLeagueGradient(tier) {
+            const gradients = {
+                'bronze': 'from-orange-600 to-orange-800',
+                'silver': 'from-gray-400 to-gray-600',
+                'gold': 'from-yellow-400 to-yellow-600',
+                'platinum': 'from-cyan-400 to-cyan-600',
+                'diamond': 'from-blue-400 to-blue-600',
+                'master': 'from-purple-500 to-pink-600'
+            };
+            return gradients[tier] || gradients.bronze;
+        }
+        
+        // ================================================
+        // INIT
+        // ================================================
+        
+        loadGamificationData();
+    </script>
+</body>
+</html>
